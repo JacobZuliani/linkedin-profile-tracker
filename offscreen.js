@@ -78,6 +78,11 @@ function rowToCsv(row) {
   return HEADERS.map((h) => csvEscape(row[h])).join(",") + "\n";
 }
 
+function rowsToCsv(rows) {
+  return [HEADERS.join(","), ...rows.map((row) => HEADERS.map((h) => csvEscape(row[h])).join(","))]
+    .join("\n") + "\n";
+}
+
 async function ensureHeaders(handle) {
   const file = await handle.getFile();
   if (file.size > 0) return;
@@ -95,6 +100,12 @@ async function appendRow(handle, row) {
   const writable = await handle.createWritable({ keepExistingData: false });
   const headerPrefix = existing.length === 0 ? HEADERS.join(",") + "\n" : "";
   await writable.write(existing + headerPrefix + rowToCsv(row));
+  await writable.close();
+}
+
+async function syncRows(handle, rows) {
+  const writable = await handle.createWritable({ keepExistingData: false });
+  await writable.write(rowsToCsv(rows));
   await writable.close();
 }
 
@@ -120,7 +131,7 @@ async function verifyPermission(handle) {
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (!["APPEND_ROW", "OFFSCREEN_PING", "SET_HANDLE"].includes(msg?.type)) {
+  if (!["APPEND_ROW", "SYNC_ROWS", "OFFSCREEN_PING", "SET_HANDLE"].includes(msg?.type)) {
     return false;
   }
 
@@ -156,6 +167,28 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         }
         await ensureHeaders(handle);
         await appendRow(handle, msg.row);
+        sendResponse({ ok: true });
+        return;
+      }
+
+      if (msg?.type === "SYNC_ROWS") {
+        const handle = activeHandle || (await loadHandle());
+        if (!handle) {
+          sendResponse({ ok: false, noFile: true });
+          return;
+        }
+        if (!isFileHandle(handle)) {
+          activeHandle = null;
+          sendResponse({ ok: false, noFile: true });
+          return;
+        }
+        activeHandle = handle;
+        const ok = await verifyPermission(handle);
+        if (!ok) {
+          sendResponse({ ok: false, needsPermission: true });
+          return;
+        }
+        await syncRows(handle, msg.rows || []);
         sendResponse({ ok: true });
         return;
       }

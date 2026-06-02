@@ -12,6 +12,27 @@ const OFFSCREEN_DOC = "offscreen.html";
 const DEDUP_KEY = "seenUrls";
 const ROWS_KEY = "rows";
 const STATUS_KEY = "lastStatus";
+const MIN_PARSED_SECTIONS_TO_SAVE = 2;
+const PROFILE_SECTION_KEYS = [
+  "description",
+  "work_history",
+  "education",
+  "licenses_certifications",
+  "volunteering",
+  "projects",
+  "skills",
+  "languages",
+  "recommendations",
+  "interests",
+  "featured",
+  "activity",
+  "courses",
+  "honors_awards",
+  "publications",
+  "patents",
+  "organizations",
+  "causes"
+];
 
 // Safari doesn't implement chrome.offscreen; feature-detect it.
 const OFFSCREEN_SUPPORTED = typeof chrome.offscreen !== "undefined";
@@ -98,11 +119,64 @@ chrome.webNavigation.onCompleted.addListener(
   { url: [{ hostEquals: "www.linkedin.com", pathPrefix: PROFILE_PATH_PREFIX }] }
 );
 
-async function appendRowToStorage(row) {
-  const { [ROWS_KEY]: rows = [] } = await chrome.storage.local.get(ROWS_KEY);
-  rows.push(row);
-  await chrome.storage.local.set({ [ROWS_KEY]: rows });
-  return rows.length;
+function cleanText(value) {
+  return String(value || "").trim();
+}
+
+function rowCompletenessScore(row) {
+  const sectionCount = PROFILE_SECTION_KEYS.filter((key) => cleanText(row[key])).length;
+  const sectionLength = PROFILE_SECTION_KEYS.reduce(
+    (total, key) => total + cleanText(row[key]).length,
+    0
+  );
+  const basicCount = ["name", "headline", "company", "location"].filter((key) =>
+    cleanText(row[key])
+  ).length;
+
+  return sectionCount * 100000 + sectionLength + basicCount * 100;
+}
+
+function parsedSectionCount(row) {
+  return PROFILE_SECTION_KEYS.filter((key) => cleanText(row[key])).length;
+}
+
+function mergeRows(existing, incoming) {
+  const merged = { ...existing, ...incoming };
+  for (const [key, value] of Object.entries(existing)) {
+    if (!cleanText(incoming[key]) && cleanText(value)) {
+      merged[key] = value;
+    }
+  }
+  return merged;
+}
+
+async function upsertRowToStorage(row) {
+  const data = await chrome.storage.local.get([ROWS_KEY, DEDUP_KEY]);
+  const rows = data[ROWS_KEY] ?? [];
+  const seen = data[DEDUP_KEY] ?? {};
+  const normalized = normalizeProfileUrl(row.url);
+  const nextRow = { ...row, url: normalized };
+  const existingIndex = rows.findIndex((candidate) => normalizeProfileUrl(candidate.url) === normalized);
+
+  seen[normalized] = Date.now();
+
+  if (existingIndex === -1) {
+    rows.push(nextRow);
+    await chrome.storage.local.set({ [ROWS_KEY]: rows, [DEDUP_KEY]: seen });
+    return { rows, total: rows.length, added: true };
+  }
+
+  const existing = rows[existingIndex];
+  const nextScore = rowCompletenessScore(nextRow);
+  const existingScore = rowCompletenessScore(existing);
+  if (nextScore <= existingScore) {
+    await chrome.storage.local.set({ [DEDUP_KEY]: seen });
+    return { rows, total: rows.length, duplicate: true };
+  }
+
+  rows[existingIndex] = mergeRows(existing, nextRow);
+  await chrome.storage.local.set({ [ROWS_KEY]: rows, [DEDUP_KEY]: seen });
+  return { rows, total: rows.length, updated: true };
 }
 
 async function tryWriteToFile(row) {
@@ -111,6 +185,18 @@ async function tryWriteToFile(row) {
   if (!ready) return { skipped: true };
   try {
     const result = await chrome.runtime.sendMessage({ type: "APPEND_ROW", row });
+    return result ?? { ok: false };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+async function trySyncFile(rows) {
+  if (!OFFSCREEN_SUPPORTED) return { skipped: true };
+  const ready = await ensureOffscreen();
+  if (!ready) return { skipped: true };
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "SYNC_ROWS", rows });
     return result ?? { ok: false };
   } catch (err) {
     return { ok: false, error: String(err) };
@@ -132,33 +218,41 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
     if (msg?.type === "PROFILE_DATA") {
       const normalized = normalizeProfileUrl(msg.data.url);
-      const { [DEDUP_KEY]: seen = {} } = await chrome.storage.local.get(DEDUP_KEY);
-      if (seen[normalized]) {
+      const row = { ...msg.data, url: normalized };
+
+      if (parsedSectionCount(row) < MIN_PARSED_SECTIONS_TO_SAVE) {
+        await setStatus(`Skipped ${normalized}; profile sections are not loaded yet.`);
+        sendResponse({ ok: true, skipped: true, incomplete: true });
+        return;
+      }
+
+      const result = await upsertRowToStorage(row);
+
+      if (result.duplicate) {
         sendResponse({ ok: true, duplicate: true });
         return;
       }
-      seen[normalized] = Date.now();
-      await chrome.storage.local.set({ [DEDUP_KEY]: seen });
 
-      const row = { ...msg.data, url: normalized };
-      const total = await appendRowToStorage(row);
+      const fileResult = result.updated
+        ? await trySyncFile(result.rows)
+        : await tryWriteToFile(row);
 
-      const fileResult = await tryWriteToFile(row);
+      const action = result.updated ? "Updated" : "Saved";
       if (fileResult.ok) {
-        await setStatus(`Saved ${normalized} (file + ${total} stored)`);
+        await setStatus(`${action} ${normalized} (file + ${result.total} stored)`);
       } else if (fileResult.skipped) {
-        await setStatus(`Saved ${normalized} (${total} stored; open popup to download)`);
+        await setStatus(`${action} ${normalized} (${result.total} stored; open popup to download)`);
       } else if (fileResult.needsPermission) {
         await setStatus(
-          `Saved to storage (${total}). Click Resume in the popup to also write to your CSV.`
+          `${action} storage (${result.total}). Click Resume in the popup to also write to your CSV.`
         );
       } else if (fileResult.noFile) {
-        await setStatus(`Saved to storage (${total}). Pick a CSV file to enable auto-append.`);
+        await setStatus(`${action} storage (${result.total}). Pick a CSV file to enable auto-append.`);
       } else {
-        await setStatus(`Saved to storage (${total}). File write skipped.`);
+        await setStatus(`${action} storage (${result.total}). File write skipped.`);
       }
 
-      sendResponse({ ok: true, total });
+      sendResponse({ ok: true, total: result.total, updated: result.updated });
       return;
     }
 

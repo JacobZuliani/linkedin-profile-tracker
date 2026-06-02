@@ -4,6 +4,12 @@
   const FIELD_TIMEOUT_MS = 8000;
   const INLINE_EXPAND_WAIT_MS = 400;
   const DETAIL_FETCH_TIMEOUT_MS = 6000;
+  const SECTION_SETTLE_TIMEOUT_MS = 7000;
+  const SECTION_SETTLE_POLL_MS = 700;
+  const SECTION_STABLE_POLLS = 2;
+  const MIN_PROFILE_SECTIONS_TO_SAVE = 2;
+  const PROFILE_RETRY_DELAY_MS = 3000;
+  const MAX_PROFILE_RETRIES = 4;
 
   const SECTION_LABELS = {
     description: ["About"],
@@ -156,6 +162,54 @@
     return labels.some((label) => title === label.toLowerCase());
   }
 
+  function knownSectionCount(sections) {
+    return sections.filter((section) =>
+      Object.values(SECTION_LABELS).some((labels) => sectionMatches(section, labels))
+    ).length;
+  }
+
+  function sectionSignature(sections) {
+    return sections.map((section) => `${section.title}:${section.text.length}`).join("|");
+  }
+
+  function sectionTextLength(sections) {
+    return sections.reduce((total, section) => total + section.text.length, 0);
+  }
+
+  async function waitForSectionsToSettle() {
+    const start = Date.now();
+    let bestSections = extractSections();
+    let bestScore = knownSectionCount(bestSections) * 100000 + sectionTextLength(bestSections);
+    let lastSignature = sectionSignature(bestSections);
+    let stablePolls = 0;
+
+    while (Date.now() - start < SECTION_SETTLE_TIMEOUT_MS) {
+      await sleep(SECTION_SETTLE_POLL_MS);
+      const sections = extractSections();
+      const signature = sectionSignature(sections);
+      const sectionCount = knownSectionCount(sections);
+      const score = sectionCount * 100000 + sectionTextLength(sections);
+
+      if (score > bestScore) {
+        bestSections = sections;
+        bestScore = score;
+      }
+
+      if (sectionCount > 0 && signature === lastSignature) {
+        stablePolls += 1;
+        if (stablePolls >= SECTION_STABLE_POLLS) {
+          return sections;
+        }
+      } else {
+        stablePolls = 0;
+      }
+
+      lastSignature = signature;
+    }
+
+    return bestSections;
+  }
+
   function pickSectionText(sections, labels) {
     return sections
       .filter((section) => sectionMatches(section, labels))
@@ -267,25 +321,49 @@
     // Heuristic cleanup: location selectors sometimes pick up "Contact info" links.
     if (/contact info/i.test(row.location)) row.location = "";
 
-    const sections = await enrichSectionsWithDetailPages(extractSections());
+    const sections = await enrichSectionsWithDetailPages(await waitForSectionsToSettle());
     for (const [key, labels] of Object.entries(SECTION_LABELS)) {
       row[key] = pickSectionText(sections, labels);
     }
     row.full_profile_text = profileText(row, sections);
+    row.__section_count = knownSectionCount(sections);
 
     return row;
   }
 
   let inFlight = false;
+  let retryCount = 0;
+  let retryTimer = null;
+
+  function scheduleRetry() {
+    if (retryCount >= MAX_PROFILE_RETRIES) return;
+    retryCount += 1;
+    clearTimeout(retryTimer);
+    retryTimer = setTimeout(run, PROFILE_RETRY_DELAY_MS);
+  }
+
   async function run() {
     if (inFlight) return;
     inFlight = true;
     try {
       const data = await extractProfile();
+      const sectionCount = data.__section_count || 0;
+      delete data.__section_count;
+
       if (!data.name && !data.headline) {
         // Probably not a real profile page (e.g. /in/me redirect, settings, etc.)
         return;
       }
+
+      if (sectionCount < MIN_PROFILE_SECTIONS_TO_SAVE) {
+        // LinkedIn has only hydrated the profile header so far. Do not save a
+        // partial row; try again after more of the profile DOM has loaded.
+        scheduleRetry();
+        return;
+      }
+
+      retryCount = 0;
+      clearTimeout(retryTimer);
       chrome.runtime.sendMessage({ type: "PROFILE_DATA", data });
     } catch (err) {
       console.warn("[LPT] extract failed:", err);
