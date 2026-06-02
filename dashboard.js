@@ -44,8 +44,7 @@ const DETAIL_FIELDS = [
   ["publications", "Publications"],
   ["patents", "Patents"],
   ["organizations", "Organizations"],
-  ["causes", "Causes"],
-  ["full_profile_text", "Full Profile Text"]
+  ["causes", "Causes"]
 ];
 
 let rows = [];
@@ -334,14 +333,12 @@ copyProfileBtn.addEventListener("click", async () => {
   const row = filteredRows[selectedIndex];
   if (!row) return;
 
-  const text =
-    cleanText(row.full_profile_text) ||
-    DETAIL_FIELDS.map(([key, label]) => {
-      const value = cleanText(row[key]);
-      return value ? `${label}\n${value}` : "";
-    })
-      .filter(Boolean)
-      .join("\n\n");
+  const text = DETAIL_FIELDS.map(([key, label]) => {
+    const value = cleanText(row[key]);
+    return value ? `${label}\n${value}` : "";
+  })
+    .filter(Boolean)
+    .join("\n\n");
 
   await navigator.clipboard.writeText(text);
   copyProfileBtn.textContent = "Copied";
