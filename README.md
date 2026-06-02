@@ -34,7 +34,7 @@ For each profile you visit, it captures one row. Basic fields are split into the
 
 When LinkedIn shows a "Show all ..." link for a supported section, the extension tries to read that detail page in your current LinkedIn session and saves the longer version if it can. If LinkedIn blocks or changes that detail page, the row still saves the visible profile text.
 
-You always get a **Download CSV** button and a local **Dashboard** button in the popup. The dashboard opens in your browser, reads the profiles saved in local extension storage, and lets you search, inspect, copy, or reopen viewed profiles. On Chrome you also get optional **auto-append** straight to a `.csv` file you pick once.
+You always get a **Download CSV** button and a local **Dashboard** button in the popup. The dashboard opens in your browser, reads the profiles saved in local extension storage, and lets you search, inspect, copy, or reopen viewed profiles. It can also remove older incomplete rows that were captured before full-profile saving existed. On Chrome you also get optional **auto-append** straight to a `.csv` file you pick once.
 
 ## Install on Chrome, Edge, Brave, Arc, or Opera
 

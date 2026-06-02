@@ -47,6 +47,11 @@ button.primary:hover {
   background: #064f99;
 }
 
+button.danger {
+  border-color: color-mix(in srgb, #c2410c 36%, transparent);
+  color: #c2410c;
+}
+
 .topbar {
   display: flex;
   align-items: center;
@@ -279,6 +284,57 @@ h1 {
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.experience-list {
+  display: grid;
+  gap: 0;
+}
+
+.experience-item {
+  padding: 14px;
+  border-bottom: 1px solid color-mix(in srgb, CanvasText 9%, transparent);
+}
+
+.experience-item:last-child {
+  border-bottom: 0;
+}
+
+.experience-item h4 {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.experience-meta {
+  margin-top: 3px;
+  color: color-mix(in srgb, CanvasText 78%, transparent);
+  font-size: 13px;
+}
+
+.experience-dates {
+  margin-top: 3px;
+  color: color-mix(in srgb, CanvasText 56%, transparent);
+  font-size: 12px;
+}
+
+.experience-description {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: color-mix(in srgb, CanvasText 82%, transparent);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.experience-description li + li {
+  margin-top: 5px;
+}
+
+.experience-skills {
+  margin-top: 10px;
+  color: color-mix(in srgb, CanvasText 62%, transparent);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .hidden {

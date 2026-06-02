@@ -65,6 +65,7 @@ const detailMetaEl = $("detail-meta");
 const sectionsEl = $("sections");
 const refreshBtn = $("refresh");
 const downloadBtn = $("download");
+const pruneIncompleteBtn = $("prune-incomplete");
 const openLinkedinBtn = $("open-linkedin");
 const copyProfileBtn = $("copy-profile");
 
@@ -101,6 +102,59 @@ function formatDate(value) {
 
 function searchableText(row) {
   return HEADERS.map((key) => cleanText(row[key])).join("\n").toLowerCase();
+}
+
+function isDateRangeLine(line) {
+  return /\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|\d{4})\b.*(?:-|Present|·)/.test(line);
+}
+
+function isSkillLine(line) {
+  return /\bskill(?:s)?\b/i.test(line) || /\+\d+\s+skills?/i.test(line);
+}
+
+function isShowAllLine(line) {
+  return /^show all\b/i.test(line);
+}
+
+function compactLines(value) {
+  return cleanText(value)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function nextExperienceStarts(lines, index) {
+  return Boolean(lines[index] && lines[index + 1] && isDateRangeLine(lines[index + 2] || ""));
+}
+
+function parseWorkHistory(value) {
+  const lines = compactLines(value).filter((line) => !isShowAllLine(line));
+  const roles = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    if (!nextExperienceStarts(lines, index)) {
+      index += 1;
+      continue;
+    }
+
+    const title = lines[index];
+    const company = lines[index + 1];
+    const dates = lines[index + 2];
+    index += 3;
+
+    const details = [];
+    while (index < lines.length && !nextExperienceStarts(lines, index)) {
+      details.push(lines[index]);
+      index += 1;
+    }
+
+    const skills = details.filter(isSkillLine);
+    const description = details.filter((line) => !isSkillLine(line));
+    roles.push({ title, company, dates, description, skills });
+  }
+
+  return roles;
 }
 
 function setSelected(index) {
@@ -168,12 +222,66 @@ function renderDetail(row) {
     const title = document.createElement("h3");
     title.textContent = label;
 
-    const text = document.createElement("pre");
-    text.textContent = value;
+    const content =
+      key === "work_history" ? renderWorkHistory(value) : renderPlainSection(value);
 
-    section.append(title, text);
+    section.append(title, content);
     sectionsEl.append(section);
   }
+}
+
+function renderPlainSection(value) {
+  const text = document.createElement("pre");
+  text.textContent = value;
+  return text;
+}
+
+function renderWorkHistory(value) {
+  const roles = parseWorkHistory(value);
+  if (!roles.length) return renderPlainSection(value);
+
+  const list = document.createElement("div");
+  list.className = "experience-list";
+
+  for (const role of roles) {
+    const item = document.createElement("article");
+    item.className = "experience-item";
+
+    const title = document.createElement("h4");
+    title.textContent = role.title;
+
+    const meta = document.createElement("div");
+    meta.className = "experience-meta";
+    meta.textContent = role.company;
+
+    const dates = document.createElement("div");
+    dates.className = "experience-dates";
+    dates.textContent = role.dates;
+
+    item.append(title, meta, dates);
+
+    if (role.description.length) {
+      const description = document.createElement("ul");
+      description.className = "experience-description";
+      for (const line of role.description) {
+        const point = document.createElement("li");
+        point.textContent = line;
+        description.append(point);
+      }
+      item.append(description);
+    }
+
+    if (role.skills.length) {
+      const skills = document.createElement("div");
+      skills.className = "experience-skills";
+      skills.textContent = role.skills.join(" · ");
+      item.append(skills);
+    }
+
+    list.append(item);
+  }
+
+  return list;
 }
 
 function applySearch() {
@@ -215,6 +323,18 @@ downloadBtn.addEventListener("click", () => {
 
 refreshBtn.addEventListener("click", loadRows);
 searchInput.addEventListener("input", applySearch);
+
+pruneIncompleteBtn.addEventListener("click", async () => {
+  if (!confirm("Remove saved profiles that are missing full profile text?")) {
+    return;
+  }
+  const result = await chrome.runtime.sendMessage({ type: "PRUNE_INCOMPLETE_ROWS" });
+  await loadRows();
+  pruneIncompleteBtn.textContent = `Removed ${result?.removed ?? 0}`;
+  setTimeout(() => {
+    pruneIncompleteBtn.textContent = "Remove Incomplete";
+  }, 1800);
+});
 
 openLinkedinBtn.addEventListener("click", () => {
   const row = filteredRows[selectedIndex];
