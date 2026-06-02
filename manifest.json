@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
   "name": "LinkedIn Profile Tracker",
-  "version": "0.1.0",
-  "description": "Automatically logs every LinkedIn profile you view (URL, name, headline, company, location, timestamp) to a local CSV file of your choice.",
+  "version": "0.2.0",
+  "description": "Automatically logs every LinkedIn profile you view (URL, name, headline, company, location, timestamp) to a local CSV file.",
   "permissions": [
     "storage",
     "webNavigation",
     "offscreen",
     "scripting",
-    "tabs"
+    "tabs",
+    "downloads"
   ],
   "host_permissions": [
     "https://www.linkedin.com/*"

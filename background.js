@@ -1,33 +1,46 @@
-// Service worker: watches LinkedIn SPA navigations and orchestrates extraction + file writes.
+// Service worker: watches LinkedIn SPA navigations, dedupes, and stores rows.
+//
+// Storage strategy (works in Chrome AND Safari):
+//   1. Every captured row is always saved to chrome.storage.local.rows.
+//      The popup can download these as a CSV anytime.
+//   2. On Chrome (where the File System Access API + offscreen documents exist),
+//      we ALSO write each row to a user-chosen CSV file for auto-append behavior.
+//      The file write is best-effort; storage is the source of truth.
 
 const PROFILE_PATH_PREFIX = "/in/";
 const OFFSCREEN_DOC = "offscreen.html";
 const DEDUP_KEY = "seenUrls";
-const COUNTER_KEY = "sessionCount";
+const ROWS_KEY = "rows";
 const STATUS_KEY = "lastStatus";
 
+// Safari doesn't implement chrome.offscreen; feature-detect it.
+const OFFSCREEN_SUPPORTED = typeof chrome.offscreen !== "undefined";
+
 async function ensureOffscreen() {
-  const existing = await chrome.offscreen.hasDocument?.();
-  if (existing) return;
+  if (!OFFSCREEN_SUPPORTED) return false;
   try {
+    const existing = await chrome.offscreen.hasDocument?.();
+    if (existing) return true;
     await chrome.offscreen.createDocument({
       url: OFFSCREEN_DOC,
       reasons: ["BLOBS"],
       justification:
         "Holds the FileSystemFileHandle for the user-chosen CSV across service worker restarts."
     });
+    return true;
   } catch (err) {
     if (!String(err).includes("Only a single offscreen")) {
-      console.error("[LPT] Failed to create offscreen document:", err);
+      console.warn("[LPT] Offscreen creation failed:", err);
+      return false;
     }
+    return true;
   }
 }
 
 function normalizeProfileUrl(rawUrl) {
   try {
     const u = new URL(rawUrl);
-    // Strip query and fragment; collapse trailing slash.
-    let path = u.pathname.replace(/\/+$/, "");
+    const path = u.pathname.replace(/\/+$/, "");
     return `${u.origin}${path}`;
   } catch {
     return rawUrl;
@@ -39,10 +52,8 @@ function isProfileUrl(url) {
     const u = new URL(url);
     if (u.hostname !== "www.linkedin.com") return false;
     if (!u.pathname.startsWith(PROFILE_PATH_PREFIX)) return false;
-    // Reject the "edit/" or "detail/" sub-paths under /in/handle/.
     const rest = u.pathname.slice(PROFILE_PATH_PREFIX.length).replace(/\/+$/, "");
-    if (!rest) return false;
-    if (rest.includes("/")) return false;
+    if (!rest || rest.includes("/")) return false;
     return true;
   } catch {
     return false;
@@ -57,9 +68,8 @@ async function handleProfileVisit(tabId, url) {
   if (!isProfileUrl(url)) return;
   try {
     await chrome.tabs.sendMessage(tabId, { type: "EXTRACT_PROFILE" });
-  } catch (err) {
-    // Content script may not be loaded yet (e.g. extension was just installed).
-    // Inject on the fly and try again.
+  } catch {
+    // Content script not loaded yet (e.g., just-installed). Inject and retry.
     try {
       await chrome.scripting.executeScript({
         target: { tabId },
@@ -88,7 +98,26 @@ chrome.webNavigation.onCompleted.addListener(
   { url: [{ hostEquals: "www.linkedin.com", pathPrefix: PROFILE_PATH_PREFIX }] }
 );
 
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+async function appendRowToStorage(row) {
+  const { [ROWS_KEY]: rows = [] } = await chrome.storage.local.get(ROWS_KEY);
+  rows.push(row);
+  await chrome.storage.local.set({ [ROWS_KEY]: rows });
+  return rows.length;
+}
+
+async function tryWriteToFile(row) {
+  if (!OFFSCREEN_SUPPORTED) return { skipped: true };
+  const ready = await ensureOffscreen();
+  if (!ready) return { skipped: true };
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "APPEND_ROW", row });
+    return result ?? { ok: false };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+}
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
     if (msg?.type === "PROFILE_DATA") {
       const normalized = normalizeProfileUrl(msg.data.url);
@@ -100,49 +129,55 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       seen[normalized] = Date.now();
       await chrome.storage.local.set({ [DEDUP_KEY]: seen });
 
-      await ensureOffscreen();
-      const writeResult = await chrome.runtime
-        .sendMessage({
-          type: "APPEND_ROW",
-          row: { ...msg.data, url: normalized }
-        })
-        .catch((e) => ({ ok: false, error: String(e) }));
+      const row = { ...msg.data, url: normalized };
+      const total = await appendRowToStorage(row);
 
-      if (writeResult?.ok) {
-        const { [COUNTER_KEY]: count = 0 } = await chrome.storage.local.get(COUNTER_KEY);
-        await chrome.storage.local.set({ [COUNTER_KEY]: count + 1 });
-        await setStatus(`Saved ${normalized}`);
-      } else if (writeResult?.needsPermission) {
-        await setStatus("Click the extension icon and press Resume to re-grant file access.");
-      } else if (writeResult?.noFile) {
-        await setStatus("No CSV chosen yet. Open the popup to pick a file.");
+      const fileResult = await tryWriteToFile(row);
+      if (fileResult.ok) {
+        await setStatus(`Saved ${normalized} (file + ${total} stored)`);
+      } else if (fileResult.skipped) {
+        await setStatus(`Saved ${normalized} (${total} stored; open popup to download)`);
+      } else if (fileResult.needsPermission) {
+        await setStatus(
+          `Saved to storage (${total}). Click Resume in the popup to also write to your CSV.`
+        );
+      } else if (fileResult.noFile) {
+        await setStatus(`Saved to storage (${total}). Pick a CSV file to enable auto-append.`);
       } else {
-        await setStatus(`Write failed: ${writeResult?.error ?? "unknown"}`);
+        await setStatus(`Saved to storage (${total}). File write skipped.`);
       }
 
-      sendResponse(writeResult ?? { ok: false });
+      sendResponse({ ok: true, total });
       return;
     }
 
     if (msg?.type === "REQUEST_STATUS") {
-      const data = await chrome.storage.local.get([COUNTER_KEY, STATUS_KEY]);
+      const data = await chrome.storage.local.get([ROWS_KEY, STATUS_KEY]);
+      const rows = data[ROWS_KEY] ?? [];
       sendResponse({
-        count: data[COUNTER_KEY] ?? 0,
-        status: data[STATUS_KEY] ?? null
+        count: rows.length,
+        status: data[STATUS_KEY] ?? null,
+        offscreenSupported: OFFSCREEN_SUPPORTED
       });
       return;
     }
 
-    if (msg?.type === "CLEAR_DEDUP") {
-      await chrome.storage.local.set({ [DEDUP_KEY]: {}, [COUNTER_KEY]: 0 });
-      await setStatus("Cleared dedup history.");
+    if (msg?.type === "REQUEST_ROWS") {
+      const { [ROWS_KEY]: rows = [] } = await chrome.storage.local.get(ROWS_KEY);
+      sendResponse({ rows });
+      return;
+    }
+
+    if (msg?.type === "CLEAR_DATA") {
+      await chrome.storage.local.set({ [DEDUP_KEY]: {}, [ROWS_KEY]: [] });
+      await setStatus("Cleared saved profiles and dedup history.");
       sendResponse({ ok: true });
       return;
     }
   })();
-  return true; // keep the channel open for async response
+  return true;
 });
 
 chrome.runtime.onInstalled.addListener(() => {
-  setStatus("Installed. Open the popup to choose your CSV file.");
+  setStatus("Installed. Open the popup to get started.");
 });

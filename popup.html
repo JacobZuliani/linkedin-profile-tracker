@@ -22,17 +22,22 @@
         text-transform: uppercase;
         opacity: 0.7;
       }
-      .file-row {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
+      .section {
         margin-bottom: 14px;
+      }
+      .section-label {
+        font-size: 11px;
+        opacity: 0.55;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 6px;
       }
       .file-name {
         font-size: 13px;
         font-weight: 600;
         word-break: break-all;
         min-height: 18px;
+        margin-bottom: 8px;
       }
       .file-name.empty {
         font-weight: 400;
@@ -47,7 +52,8 @@
         border-radius: 8px;
         font-size: 13px;
         cursor: pointer;
-        text-align: left;
+        text-align: center;
+        width: 100%;
       }
       button.primary {
         background: #0a66c2;
@@ -60,10 +66,14 @@
       button:hover {
         filter: brightness(1.05);
       }
+      button:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
       .row {
         display: flex;
         gap: 8px;
-        margin-bottom: 10px;
+        margin-top: 8px;
       }
       .row > button {
         flex: 1;
@@ -90,28 +100,45 @@
         opacity: 0.55;
         text-align: center;
       }
+      .hidden {
+        display: none !important;
+      }
+      hr {
+        border: none;
+        border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+        margin: 12px 0;
+      }
     </style>
   </head>
   <body>
     <h1>LinkedIn Profile Tracker</h1>
 
-    <div class="file-row">
+    <div class="section">
+      <div class="stats">
+        Profiles saved: <strong id="count">0</strong>
+      </div>
+      <button id="download" class="primary">Download CSV</button>
+    </div>
+
+    <div id="file-section" class="section hidden">
+      <hr />
+      <div class="section-label">Auto-append to a file (Chrome only)</div>
       <div id="file-name" class="file-name empty">No CSV file selected</div>
-      <button id="pick-file" class="primary">Choose CSV file…</button>
+      <button id="pick-file">Choose CSV file…</button>
+      <div class="row">
+        <button id="resume" class="subtle">Resume tracking</button>
+      </div>
     </div>
 
-    <div class="row">
-      <button id="resume" class="subtle">Resume tracking</button>
-      <button id="clear" class="subtle">Clear history</button>
-    </div>
-
-    <div class="stats">
-      Profiles saved this session: <span id="count">0</span>
-    </div>
+    <hr />
 
     <div id="status" class="status">Loading…</div>
 
-    <div class="footer">v0.1.0 · local CSV · no servers</div>
+    <div class="row">
+      <button id="clear" class="subtle">Clear saved data</button>
+    </div>
+
+    <div class="footer">v0.2.0 · local CSV · no servers</div>
 
     <script src="popup.js"></script>
   </body>

@@ -1,9 +1,12 @@
-// Popup: lets the user pick the CSV file once, re-grants permission after
-// browser restarts, and shows current status.
+// Popup UI.
 //
-// The File System Access API requires a user gesture for showSaveFilePicker and
-// for handle.requestPermission. Both must happen here in the popup (or another
-// visible page), never in the background service worker.
+// Always available:
+//   - "Download CSV" button: compiles stored rows into a CSV blob and downloads it.
+//   - "Clear saved data" button: wipes stored rows and dedup history.
+//
+// Chrome-only (feature-detected via showSaveFilePicker):
+//   - "Choose CSV file…" picks a file the extension will auto-append to.
+//   - "Resume tracking" re-grants write permission after a browser restart.
 
 const DB_NAME = "lpt-handles";
 const STORE = "kv";
@@ -11,6 +14,8 @@ const HANDLE_KEY = "csvFileHandle";
 const NAME_KEY = "csvFileName";
 
 const HEADERS = ["url", "name", "headline", "company", "location", "timestamp"];
+
+const HAS_FS_ACCESS = typeof window.showSaveFilePicker === "function";
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -43,15 +48,49 @@ async function dbSet(key, value) {
   });
 }
 
+function csvEscape(value) {
+  const s = value == null ? "" : String(value);
+  if (/[",\n\r]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+function rowsToCsv(rows) {
+  const lines = [HEADERS.join(",")];
+  for (const row of rows) {
+    lines.push(HEADERS.map((h) => csvEscape(row[h])).join(","));
+  }
+  return lines.join("\n") + "\n";
+}
+
 const $ = (id) => document.getElementById(id);
+const fileSection = $("file-section");
 const fileNameEl = $("file-name");
 const pickBtn = $("pick-file");
 const resumeBtn = $("resume");
 const clearBtn = $("clear");
+const downloadBtn = $("download");
 const countEl = $("count");
 const statusEl = $("status");
 
+function setStatus(text, warn) {
+  statusEl.textContent = text || "";
+  statusEl.classList.toggle("warn", !!warn);
+}
+
+function renderFileName(name) {
+  if (name) {
+    fileNameEl.textContent = name;
+    fileNameEl.classList.remove("empty");
+  } else {
+    fileNameEl.textContent = "No CSV file selected";
+    fileNameEl.classList.add("empty");
+  }
+}
+
 async function ensureOffscreen() {
+  if (!chrome.offscreen) return;
   const exists = await chrome.offscreen.hasDocument?.();
   if (exists) return;
   try {
@@ -66,90 +105,108 @@ async function ensureOffscreen() {
   }
 }
 
-function renderFileName(name) {
-  if (name) {
-    fileNameEl.textContent = name;
-    fileNameEl.classList.remove("empty");
-  } else {
-    fileNameEl.textContent = "No CSV file selected";
-    fileNameEl.classList.add("empty");
-  }
-}
-
-function setStatus(text, warn) {
-  statusEl.textContent = text || "";
-  statusEl.classList.toggle("warn", !!warn);
-}
-
 async function refreshStatus() {
-  const fileName = await dbGet(NAME_KEY);
-  renderFileName(fileName);
-
   const resp = await chrome.runtime.sendMessage({ type: "REQUEST_STATUS" });
   if (resp) {
     countEl.textContent = String(resp.count ?? 0);
+    downloadBtn.disabled = (resp.count ?? 0) === 0;
     if (resp.status?.text) {
-      const isWarn = /re-grant|failed|no csv/i.test(resp.status.text);
+      const isWarn = /re-grant|failed|resume/i.test(resp.status.text);
       setStatus(resp.status.text, isWarn);
     } else {
       setStatus("Ready.");
     }
   }
+  if (HAS_FS_ACCESS) {
+    const fileName = await dbGet(NAME_KEY);
+    renderFileName(fileName);
+  }
 }
 
-pickBtn.addEventListener("click", async () => {
-  try {
-    const handle = await window.showSaveFilePicker({
-      suggestedName: "linkedin-profiles.csv",
-      types: [
-        {
-          description: "CSV file",
-          accept: { "text/csv": [".csv"] }
-        }
-      ]
-    });
-
-    // If the file is new/empty, seed headers immediately so the user can verify.
-    const file = await handle.getFile();
-    if (file.size === 0) {
-      const writable = await handle.createWritable({ keepExistingData: false });
-      await writable.write(HEADERS.join(",") + "\n");
-      await writable.close();
-    }
-
-    await dbSet(HANDLE_KEY, handle);
-    await dbSet(NAME_KEY, handle.name);
-    renderFileName(handle.name);
-
-    await ensureOffscreen();
-    setStatus(`Saving to ${handle.name}.`);
-  } catch (err) {
-    if (err && err.name === "AbortError") return;
-    setStatus(`Could not pick file: ${err.message || err}`, true);
-  }
-});
-
-resumeBtn.addEventListener("click", async () => {
-  const handle = await dbGet(HANDLE_KEY);
-  if (!handle) {
-    setStatus("Pick a CSV file first.", true);
+downloadBtn.addEventListener("click", async () => {
+  const { rows } = (await chrome.runtime.sendMessage({ type: "REQUEST_ROWS" })) ?? { rows: [] };
+  if (!rows.length) {
+    setStatus("Nothing to download yet — visit a LinkedIn profile first.", true);
     return;
   }
+  const csv = rowsToCsv(rows);
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const filename = `linkedin-profiles-${stamp}.csv`;
+
   try {
-    const perm = await handle.requestPermission({ mode: "readwrite" });
-    if (perm === "granted") {
-      await ensureOffscreen();
-      setStatus("Tracking resumed.");
+    if (chrome.downloads?.download) {
+      await chrome.downloads.download({ url, filename, saveAs: true });
     } else {
-      setStatus("Permission denied.", true);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
     }
+    setStatus(`Exported ${rows.length} rows.`);
   } catch (err) {
-    setStatus(`Could not resume: ${err.message || err}`, true);
+    setStatus(`Download failed: ${err.message || err}`, true);
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
 });
 
+if (HAS_FS_ACCESS) {
+  fileSection.classList.remove("hidden");
+
+  pickBtn.addEventListener("click", async () => {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: "linkedin-profiles.csv",
+        types: [{ description: "CSV file", accept: { "text/csv": [".csv"] } }]
+      });
+
+      const file = await handle.getFile();
+      if (file.size === 0) {
+        const writable = await handle.createWritable({ keepExistingData: false });
+        await writable.write(HEADERS.join(",") + "\n");
+        await writable.close();
+      }
+
+      await dbSet(HANDLE_KEY, handle);
+      await dbSet(NAME_KEY, handle.name);
+      renderFileName(handle.name);
+      await ensureOffscreen();
+      setStatus(`Auto-saving to ${handle.name}.`);
+    } catch (err) {
+      if (err && err.name === "AbortError") return;
+      setStatus(`Could not pick file: ${err.message || err}`, true);
+    }
+  });
+
+  resumeBtn.addEventListener("click", async () => {
+    const handle = await dbGet(HANDLE_KEY);
+    if (!handle) {
+      setStatus("Pick a CSV file first.", true);
+      return;
+    }
+    try {
+      const perm = await handle.requestPermission({ mode: "readwrite" });
+      if (perm === "granted") {
+        await ensureOffscreen();
+        setStatus("Tracking resumed.");
+      } else {
+        setStatus("Permission denied.", true);
+      }
+    } catch (err) {
+      setStatus(`Could not resume: ${err.message || err}`, true);
+    }
+  });
+}
+
 clearBtn.addEventListener("click", async () => {
-  await chrome.runtime.sendMessage({ type: "CLEAR_DEDUP" });
+  if (!confirm("Clear all saved profiles and dedup history? Your CSV file (if any) is untouched.")) {
+    return;
+  }
+  await chrome.runtime.sendMessage({ type: "CLEAR_DATA" });
   await refreshStatus();
 });
 
