@@ -2,12 +2,39 @@
 
 A tiny browser extension that quietly logs every LinkedIn profile you view to a CSV. Zero servers, zero API keys, $0/month. Works on Chromium browsers and (with a couple extra steps) Safari.
 
-For each profile you visit, it captures one row:
+For each profile you visit, it captures one row. Basic fields are split into their own columns, common profile sections get their own long-text columns, and `full_profile_text` keeps the whole readable profile body as a fallback.
 
-| url | name | headline | company | location | timestamp |
-|-----|------|----------|---------|----------|-----------|
+| Field | What it saves |
+|-------|---------------|
+| `url` | LinkedIn profile URL |
+| `name` | Displayed profile name |
+| `headline` | Displayed headline |
+| `company` | Current company, when LinkedIn exposes it cleanly |
+| `location` | Displayed location |
+| `description` | About section |
+| `work_history` | Experience section, including visible role descriptions |
+| `education` | Education section |
+| `licenses_certifications` | Licenses and certifications section |
+| `volunteering` | Volunteering section |
+| `projects` | Projects section |
+| `skills` | Skills section |
+| `languages` | Languages section |
+| `recommendations` | Recommendations section |
+| `interests` | Interests section |
+| `featured` | Featured section |
+| `activity` | Activity section |
+| `courses` | Courses section |
+| `honors_awards` | Honors and awards section |
+| `publications` | Publications section |
+| `patents` | Patents section |
+| `organizations` | Organizations section |
+| `causes` | Causes section |
+| `full_profile_text` | Combined readable profile text from the visible profile sections |
+| `timestamp` | Capture time |
 
-You always get a **Download CSV** button in the popup. On Chrome you also get optional **auto-append** straight to a `.csv` file you pick once.
+When LinkedIn shows a "Show all ..." link for a supported section, the extension tries to read that detail page in your current LinkedIn session and saves the longer version if it can. If LinkedIn blocks or changes that detail page, the row still saves the visible profile text.
+
+You always get a **Download CSV** button and a local **Dashboard** button in the popup. The dashboard opens in your browser, reads the profiles saved in local extension storage, and lets you search, inspect, copy, or reopen viewed profiles. On Chrome you also get optional **auto-append** straight to a `.csv` file you pick once.
 
 ## Install on Chrome, Edge, Brave, Arc, or Opera
 
@@ -73,6 +100,7 @@ See [safari/README.md](safari/README.md) for the long version, distribution cave
 - [`content.js`](content.js) — DOM scraper with layered selectors and fallbacks.
 - [`offscreen.html`](offscreen.html) / [`offscreen.js`](offscreen.js) — Chrome-only file writer holding the `FileSystemFileHandle`.
 - [`popup.html`](popup.html) / [`popup.js`](popup.js) — feature-detected UI: Download CSV everywhere; file picker only on Chrome.
+- [`dashboard.html`](dashboard.html) / [`dashboard.css`](dashboard.css) / [`dashboard.js`](dashboard.js) — local searchable dashboard for saved profiles.
 - [`icons/`](icons/) — 16/48/128 px PNG icons.
 - [`safari/`](safari/) — Safari Web Extension converter script and notes.
 
@@ -86,7 +114,7 @@ To find one: right-click the field on a profile page → Inspect → look for st
 
 This extension only reads pages you're already viewing in your own browser session — no scraping of pages you wouldn't otherwise see, no automation that fetches profiles in the background, no API abuse. That's the same posture as your browser's own history.
 
-Saving the displayed name/headline/company/location into a private local file for personal reference is broadly considered acceptable for personal use, but redistributing the data, selling it, building a product on top of it, or using it to circumvent LinkedIn's own search/filtering is **not** allowed under LinkedIn's User Agreement. Use it for your own bookkeeping.
+Saving displayed profile details into a private local file for personal reference is broadly considered acceptable for personal use, but redistributing the data, selling it, building a product on top of it, or using it to circumvent LinkedIn's own search/filtering is **not** allowed under LinkedIn's User Agreement. Use it for your own bookkeeping.
 
 ## Roadmap ideas
 

@@ -1,0 +1,68 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LinkedIn Profile Dashboard</title>
+    <link rel="stylesheet" href="dashboard.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">Local Dashboard</div>
+        <h1>LinkedIn Profiles</h1>
+      </div>
+      <div class="actions">
+        <button id="refresh" type="button">Refresh</button>
+        <button id="download" class="primary" type="button">Download CSV</button>
+      </div>
+    </header>
+
+    <main class="shell">
+      <aside class="sidebar">
+        <div class="summary">
+          <div>
+            <span id="total-count">0</span>
+            <small>Saved</small>
+          </div>
+          <div>
+            <span id="shown-count">0</span>
+            <small>Shown</small>
+          </div>
+        </div>
+
+        <label class="search">
+          <span>Search</span>
+          <input id="search" type="search" placeholder="Name, company, skill, role..." />
+        </label>
+
+        <div id="profile-list" class="profile-list" role="listbox" aria-label="Saved profiles"></div>
+      </aside>
+
+      <section class="detail" aria-live="polite">
+        <div id="empty-state" class="empty-state">
+          <h2>No Profile Selected</h2>
+          <p>Select a saved profile from the list.</p>
+        </div>
+
+        <article id="profile-detail" class="profile-detail hidden">
+          <div class="profile-header">
+            <div>
+              <h2 id="detail-name"></h2>
+              <p id="detail-headline"></p>
+              <p id="detail-meta"></p>
+            </div>
+            <div class="profile-actions">
+              <button id="open-linkedin" type="button">Open LinkedIn</button>
+              <button id="copy-profile" type="button">Copy Text</button>
+            </div>
+          </div>
+
+          <div id="sections" class="sections"></div>
+        </article>
+      </section>
+    </main>
+
+    <script src="dashboard.js"></script>
+  </body>
+</html>

@@ -13,7 +13,33 @@ const STORE = "kv";
 const HANDLE_KEY = "csvFileHandle";
 const NAME_KEY = "csvFileName";
 
-const HEADERS = ["url", "name", "headline", "company", "location", "timestamp"];
+const HEADERS = [
+  "url",
+  "name",
+  "headline",
+  "company",
+  "location",
+  "description",
+  "work_history",
+  "education",
+  "licenses_certifications",
+  "volunteering",
+  "projects",
+  "skills",
+  "languages",
+  "recommendations",
+  "interests",
+  "featured",
+  "activity",
+  "courses",
+  "honors_awards",
+  "publications",
+  "patents",
+  "organizations",
+  "causes",
+  "full_profile_text",
+  "timestamp"
+];
 
 const HAS_FS_ACCESS = typeof window.showSaveFilePicker === "function";
 
@@ -71,6 +97,7 @@ const pickBtn = $("pick-file");
 const resumeBtn = $("resume");
 const clearBtn = $("clear");
 const downloadBtn = $("download");
+const dashboardBtn = $("dashboard");
 const countEl = $("count");
 const statusEl = $("status");
 
@@ -116,6 +143,15 @@ async function syncStoredRowsToFile(handle) {
   await writable.write(rowsToCsv(rows));
   await writable.close();
   return rows.length;
+}
+
+function isFileHandle(handle) {
+  return (
+    handle &&
+    typeof handle.getFile === "function" &&
+    typeof handle.createWritable === "function" &&
+    typeof handle.requestPermission === "function"
+  );
 }
 
 async function refreshStatus() {
@@ -167,6 +203,10 @@ downloadBtn.addEventListener("click", async () => {
   }
 });
 
+dashboardBtn.addEventListener("click", async () => {
+  await chrome.tabs.create({ url: chrome.runtime.getURL("dashboard.html") });
+});
+
 if (HAS_FS_ACCESS) {
   fileSection.classList.remove("hidden");
 
@@ -198,8 +238,8 @@ if (HAS_FS_ACCESS) {
 
   resumeBtn.addEventListener("click", async () => {
     const handle = await dbGet(HANDLE_KEY);
-    if (!handle) {
-      setStatus("Pick a CSV file first.", true);
+    if (!isFileHandle(handle)) {
+      setStatus("Choose the CSV file again so Chrome can re-grant write access.", true);
       return;
     }
     try {

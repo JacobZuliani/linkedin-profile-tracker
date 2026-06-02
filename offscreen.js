@@ -6,7 +6,33 @@ const DB_NAME = "lpt-handles";
 const STORE = "kv";
 const HANDLE_KEY = "csvFileHandle";
 
-const HEADERS = ["url", "name", "headline", "company", "location", "timestamp"];
+const HEADERS = [
+  "url",
+  "name",
+  "headline",
+  "company",
+  "location",
+  "description",
+  "work_history",
+  "education",
+  "licenses_certifications",
+  "volunteering",
+  "projects",
+  "skills",
+  "languages",
+  "recommendations",
+  "interests",
+  "featured",
+  "activity",
+  "courses",
+  "honors_awards",
+  "publications",
+  "patents",
+  "organizations",
+  "causes",
+  "full_profile_text",
+  "timestamp"
+];
 let activeHandle = null;
 
 function openDB() {
@@ -72,6 +98,16 @@ async function appendRow(handle, row) {
   await writable.close();
 }
 
+function isFileHandle(handle) {
+  return (
+    handle &&
+    typeof handle.getFile === "function" &&
+    typeof handle.createWritable === "function" &&
+    typeof handle.queryPermission === "function" &&
+    typeof handle.requestPermission === "function"
+  );
+}
+
 async function verifyPermission(handle) {
   const opts = { mode: "readwrite" };
   if ((await handle.queryPermission(opts)) === "granted") return true;
@@ -91,6 +127,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   (async () => {
     try {
       if (msg?.type === "SET_HANDLE") {
+        if (!isFileHandle(msg.handle)) {
+          sendResponse({ ok: false, noFile: true });
+          return;
+        }
         activeHandle = msg.handle;
         await saveHandle(activeHandle);
         sendResponse({ ok: true });
@@ -100,6 +140,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       if (msg?.type === "APPEND_ROW") {
         const handle = activeHandle || (await loadHandle());
         if (!handle) {
+          sendResponse({ ok: false, noFile: true });
+          return;
+        }
+        if (!isFileHandle(handle)) {
+          activeHandle = null;
           sendResponse({ ok: false, noFile: true });
           return;
         }

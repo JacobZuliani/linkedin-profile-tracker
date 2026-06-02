@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "LinkedIn Profile Tracker",
   "version": "0.2.0",
-  "description": "Automatically logs every LinkedIn profile you view (URL, name, headline, company, location, timestamp) to a local CSV file.",
+  "description": "Automatically logs LinkedIn profiles you view, including profile text and common sections, to a local CSV file.",
   "permissions": [
     "storage",
     "webNavigation",
