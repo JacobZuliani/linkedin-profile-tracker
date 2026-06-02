@@ -118,6 +118,10 @@ async function tryWriteToFile(row) {
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (!["PROFILE_DATA", "REQUEST_STATUS", "REQUEST_ROWS", "CLEAR_DATA"].includes(msg?.type)) {
+    return false;
+  }
+
   (async () => {
     if (msg?.type === "PROFILE_DATA") {
       const normalized = normalizeProfileUrl(msg.data.url);

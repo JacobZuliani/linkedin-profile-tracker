@@ -7,6 +7,7 @@ const STORE = "kv";
 const HANDLE_KEY = "csvFileHandle";
 
 const HEADERS = ["url", "name", "headline", "company", "location", "timestamp"];
+let activeHandle = null;
 
 function openDB() {
   return new Promise((resolve, reject) => {
@@ -83,14 +84,26 @@ async function verifyPermission(handle) {
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (!["APPEND_ROW", "OFFSCREEN_PING", "SET_HANDLE"].includes(msg?.type)) {
+    return false;
+  }
+
   (async () => {
     try {
+      if (msg?.type === "SET_HANDLE") {
+        activeHandle = msg.handle;
+        await saveHandle(activeHandle);
+        sendResponse({ ok: true });
+        return;
+      }
+
       if (msg?.type === "APPEND_ROW") {
-        const handle = await loadHandle();
+        const handle = activeHandle || (await loadHandle());
         if (!handle) {
           sendResponse({ ok: false, noFile: true });
           return;
         }
+        activeHandle = handle;
         const ok = await verifyPermission(handle);
         if (!ok) {
           sendResponse({ ok: false, needsPermission: true });

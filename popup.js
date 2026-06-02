@@ -105,6 +105,19 @@ async function ensureOffscreen() {
   }
 }
 
+async function activateFileHandle(handle) {
+  await ensureOffscreen();
+  await chrome.runtime.sendMessage({ type: "SET_HANDLE", handle });
+}
+
+async function syncStoredRowsToFile(handle) {
+  const { rows } = (await chrome.runtime.sendMessage({ type: "REQUEST_ROWS" })) ?? { rows: [] };
+  const writable = await handle.createWritable({ keepExistingData: false });
+  await writable.write(rowsToCsv(rows));
+  await writable.close();
+  return rows.length;
+}
+
 async function refreshStatus() {
   const resp = await chrome.runtime.sendMessage({ type: "REQUEST_STATUS" });
   if (resp) {
@@ -174,8 +187,9 @@ if (HAS_FS_ACCESS) {
       await dbSet(HANDLE_KEY, handle);
       await dbSet(NAME_KEY, handle.name);
       renderFileName(handle.name);
-      await ensureOffscreen();
-      setStatus(`Auto-saving to ${handle.name}.`);
+      await activateFileHandle(handle);
+      const synced = await syncStoredRowsToFile(handle);
+      setStatus(`Auto-saving to ${handle.name}. Synced ${synced} stored rows.`);
     } catch (err) {
       if (err && err.name === "AbortError") return;
       setStatus(`Could not pick file: ${err.message || err}`, true);
@@ -191,8 +205,10 @@ if (HAS_FS_ACCESS) {
     try {
       const perm = await handle.requestPermission({ mode: "readwrite" });
       if (perm === "granted") {
-        await ensureOffscreen();
-        setStatus("Tracking resumed.");
+        await dbSet(HANDLE_KEY, handle);
+        await activateFileHandle(handle);
+        const synced = await syncStoredRowsToFile(handle);
+        setStatus(`Tracking resumed. Synced ${synced} stored rows.`);
       } else {
         setStatus("Permission denied.", true);
       }
