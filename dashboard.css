@@ -47,11 +47,6 @@ button.primary:hover {
   background: #064f99;
 }
 
-button.danger {
-  border-color: color-mix(in srgb, #c2410c 36%, transparent);
-  color: #c2410c;
-}
-
 .topbar {
   display: flex;
   align-items: center;

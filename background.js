@@ -105,32 +105,6 @@ async function appendRowToStorage(row) {
   return rows.length;
 }
 
-function hasFullProfile(row) {
-  return Boolean(String(row?.full_profile_text || "").trim());
-}
-
-async function pruneIncompleteRows() {
-  const data = await chrome.storage.local.get([ROWS_KEY, DEDUP_KEY]);
-  const rows = data[ROWS_KEY] ?? [];
-  const keptRows = rows.filter(hasFullProfile);
-  const rebuiltSeen = {};
-
-  for (const row of keptRows) {
-    const normalized = normalizeProfileUrl(row.url);
-    const capturedAt = new Date(row.timestamp || 0).getTime();
-    rebuiltSeen[normalized] = Number.isFinite(capturedAt) && capturedAt > 0 ? capturedAt : Date.now();
-  }
-
-  await chrome.storage.local.set({
-    [ROWS_KEY]: keptRows,
-    [DEDUP_KEY]: rebuiltSeen
-  });
-
-  const removed = rows.length - keptRows.length;
-  await setStatus(`Removed ${removed} incomplete saved profiles. ${keptRows.length} complete profiles remain.`);
-  return { removed, kept: keptRows.length };
-}
-
 async function tryWriteToFile(row) {
   if (!OFFSCREEN_SUPPORTED) return { skipped: true };
   const ready = await ensureOffscreen();
@@ -149,7 +123,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       "PROFILE_DATA",
       "REQUEST_STATUS",
       "REQUEST_ROWS",
-      "PRUNE_INCOMPLETE_ROWS",
       "CLEAR_DATA"
     ].includes(msg?.type)
   ) {
@@ -203,11 +176,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg?.type === "REQUEST_ROWS") {
       const { [ROWS_KEY]: rows = [] } = await chrome.storage.local.get(ROWS_KEY);
       sendResponse({ rows });
-      return;
-    }
-
-    if (msg?.type === "PRUNE_INCOMPLETE_ROWS") {
-      sendResponse(await pruneIncompleteRows());
       return;
     }
 

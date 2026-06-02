@@ -65,7 +65,6 @@ const detailMetaEl = $("detail-meta");
 const sectionsEl = $("sections");
 const refreshBtn = $("refresh");
 const downloadBtn = $("download");
-const pruneIncompleteBtn = $("prune-incomplete");
 const openLinkedinBtn = $("open-linkedin");
 const copyProfileBtn = $("copy-profile");
 
@@ -323,18 +322,6 @@ downloadBtn.addEventListener("click", () => {
 
 refreshBtn.addEventListener("click", loadRows);
 searchInput.addEventListener("input", applySearch);
-
-pruneIncompleteBtn.addEventListener("click", async () => {
-  if (!confirm("Remove saved profiles that are missing full profile text?")) {
-    return;
-  }
-  const result = await chrome.runtime.sendMessage({ type: "PRUNE_INCOMPLETE_ROWS" });
-  await loadRows();
-  pruneIncompleteBtn.textContent = `Removed ${result?.removed ?? 0}`;
-  setTimeout(() => {
-    pruneIncompleteBtn.textContent = "Remove Incomplete";
-  }, 1800);
-});
 
 openLinkedinBtn.addEventListener("click", () => {
   const row = filteredRows[selectedIndex];
